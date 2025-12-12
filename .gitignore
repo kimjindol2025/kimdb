@@ -24,3 +24,10 @@ Thumbs.db
 dist/
 build/
 *.egg-info/
+
+# Backups
+backups/*.db
+
+# SQLite WAL files
+*.db-shm
+*.db-wal
