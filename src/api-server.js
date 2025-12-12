@@ -1,18 +1,19 @@
 /**
- * kimdb API Server v2.1.0
- * 외부 의존 최소화 버전
+ * kimdb API Server v2.2.0
+ * 외부 의존 최소화 + Wiki API
  */
 
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import Database from "better-sqlite3";
+import crypto from "crypto";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync } from "fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 40000;
-const VERSION = "2.1.0";
+const VERSION = "2.2.0";
 
 const DB_DIR = join(__dirname, "..", "shared_database");
 const DB_PATH = join(DB_DIR, "code_team_ai.db");
@@ -60,12 +61,45 @@ function createBackup() {
 const fastify = Fastify({ logger: true });
 await fastify.register(cors, { origin: true });
 
-fastify.get("/health", async () => ({ 
-  status: "ok", version: VERSION, uptime: process.uptime() 
+// ===== 시스템 API =====
+
+fastify.get("/health", async () => ({
+  status: "ok", version: VERSION, uptime: process.uptime()
 }));
 
 fastify.get("/docs", async (req, reply) => {
-  reply.type("text/html").send("<!DOCTYPE html><html><head><title>kimdb API</title><style>body{font-family:system-ui;max-width:900px;margin:0 auto;padding:20px;background:#1a1a2e;color:#eee}h1{color:#00d9ff}h2{color:#0abde3}pre{background:#0a0a14;padding:15px;border-radius:8px}</style></head><body><h1>kimdb API v" + VERSION + "</h1><h2>Endpoints</h2><pre>GET  /health - 상태\nGET  /api/stats - 통계\nPOST /api/checkpoint - 체크포인트\nPOST /api/backup - 백업 생성\nGET  /api/backups - 백업 목록\nGET  /api/ai/systems - AI 시스템\nGET  /api/ai/storage - AI 저장소\nGET  /api/search?q=검색어 - 검색\nPOST /api/index - 문서 인덱싱\nPOST /api/query - SQL 쿼리</pre></body></html>");
+  reply.type("text/html").send(`<!DOCTYPE html><html><head><title>kimdb API</title>
+<style>body{font-family:system-ui;max-width:900px;margin:0 auto;padding:20px;background:#1a1a2e;color:#eee}
+h1{color:#00d9ff}h2{color:#0abde3;margin-top:30px}pre{background:#0a0a14;padding:15px;border-radius:8px;overflow-x:auto}
+.ep{background:#16213e;padding:10px 15px;margin:5px 0;border-radius:6px;font-family:monospace}</style></head>
+<body><h1>kimdb API v${VERSION}</h1>
+<h2>System</h2>
+<div class="ep">GET /health</div>
+<div class="ep">GET /api/stats</div>
+<div class="ep">POST /api/checkpoint</div>
+<div class="ep">POST /api/backup</div>
+<div class="ep">GET /api/backups</div>
+<div class="ep">POST /api/query</div>
+<h2>AI Data</h2>
+<div class="ep">GET /api/ai/systems</div>
+<div class="ep">GET /api/ai/storage</div>
+<h2>Search</h2>
+<div class="ep">GET /api/search?q=검색어</div>
+<div class="ep">POST /api/index</div>
+<h2>Wiki</h2>
+<div class="ep">GET /api/wiki/categories</div>
+<div class="ep">POST /api/wiki/categories</div>
+<div class="ep">GET /api/wiki/documents</div>
+<div class="ep">GET /api/wiki/documents/:slug</div>
+<div class="ep">POST /api/wiki/documents</div>
+<div class="ep">PUT /api/wiki/documents/:slug</div>
+<div class="ep">DELETE /api/wiki/documents/:slug</div>
+<div class="ep">GET /api/wiki/edit-requests</div>
+<div class="ep">POST /api/wiki/edit-requests</div>
+<div class="ep">PUT /api/wiki/edit-requests/:id</div>
+<div class="ep">GET /api/wiki/glossary</div>
+<div class="ep">POST /api/wiki/glossary</div>
+</body></html>`);
 });
 
 fastify.get("/api/stats", async () => {
@@ -141,6 +175,143 @@ fastify.post("/api/query", async (req) => {
   } catch (e) { return { success: false, error: e.message }; }
 });
 
+// ===== Wiki API =====
+
+fastify.get("/api/wiki/categories", async () => {
+  const data = db.prepare("SELECT * FROM wiki_categories ORDER BY display_order").all();
+  return { success: true, count: data.length, data };
+});
+
+fastify.post("/api/wiki/categories", async (req) => {
+  const { id, name, slug, icon, display_order } = req.body || {};
+  if (!name || !slug) return { success: false, error: "name, slug required" };
+  const docId = id || crypto.randomUUID();
+  try {
+    db.prepare("INSERT INTO wiki_categories (id, name, slug, icon, display_order) VALUES (?, ?, ?, ?, ?)").run(docId, name, slug, icon || null, display_order || 0);
+    return { success: true, id: docId };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+fastify.get("/api/wiki/documents", async (req) => {
+  const categoryId = req.query.category_id;
+  const limit = parseInt(req.query.limit) || 50;
+  const offset = parseInt(req.query.offset) || 0;
+  let sql = "SELECT * FROM wiki_documents";
+  const params = [];
+  if (categoryId) { sql += " WHERE category_id = ?"; params.push(categoryId); }
+  sql += " ORDER BY display_order LIMIT ? OFFSET ?";
+  params.push(limit, offset);
+  const data = db.prepare(sql).all(...params);
+  return { success: true, count: data.length, data };
+});
+
+fastify.get("/api/wiki/documents/:slug", async (req) => {
+  const slug = req.params.slug;
+  const doc = db.prepare("SELECT * FROM wiki_documents WHERE slug = ?").get(slug);
+  if (!doc) return { success: false, error: "not found" };
+  db.prepare("UPDATE wiki_documents SET views = views + 1 WHERE slug = ?").run(slug);
+  const category = db.prepare("SELECT * FROM wiki_categories WHERE id = ?").get(doc.category_id);
+  const children = db.prepare("SELECT id, title, slug FROM wiki_documents WHERE parent_id = ? ORDER BY display_order").all(doc.id);
+  return { success: true, data: { ...doc, category, children } };
+});
+
+fastify.post("/api/wiki/documents", async (req) => {
+  const { id, title, slug, content, summary, category_id, parent_id, display_order } = req.body || {};
+  if (!title || !slug || !content || !category_id) return { success: false, error: "title, slug, content, category_id required" };
+  const docId = id || crypto.randomUUID();
+  try {
+    db.prepare("INSERT INTO wiki_documents (id, title, slug, content, summary, category_id, parent_id, display_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(docId, title, slug, content, summary || null, category_id, parent_id || null, display_order || 0);
+    db.prepare("INSERT OR REPLACE INTO fts_documents (doc_id, title, content, tags, category) VALUES (?, ?, ?, ?, ?)").run("wiki:" + docId, title, content, "", "wiki");
+    return { success: true, id: docId };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+fastify.put("/api/wiki/documents/:slug", async (req) => {
+  const slug = req.params.slug;
+  const { title, content, summary, display_order } = req.body || {};
+  const existing = db.prepare("SELECT id FROM wiki_documents WHERE slug = ?").get(slug);
+  if (!existing) return { success: false, error: "not found" };
+  try {
+    db.prepare("UPDATE wiki_documents SET title = COALESCE(?, title), content = COALESCE(?, content), summary = COALESCE(?, summary), display_order = COALESCE(?, display_order), updated_at = CURRENT_TIMESTAMP WHERE slug = ?").run(title, content, summary, display_order, slug);
+    if (title || content) {
+      const doc = db.prepare("SELECT * FROM wiki_documents WHERE slug = ?").get(slug);
+      db.prepare("INSERT OR REPLACE INTO fts_documents (doc_id, title, content, tags, category) VALUES (?, ?, ?, ?, ?)").run("wiki:" + existing.id, doc.title, doc.content, "", "wiki");
+    }
+    return { success: true };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+fastify.delete("/api/wiki/documents/:slug", async (req) => {
+  const slug = req.params.slug;
+  try {
+    const doc = db.prepare("SELECT id FROM wiki_documents WHERE slug = ?").get(slug);
+    if (!doc) return { success: false, error: "not found" };
+    db.prepare("DELETE FROM wiki_documents WHERE slug = ?").run(slug);
+    db.prepare("DELETE FROM fts_documents WHERE doc_id = ?").run("wiki:" + doc.id);
+    return { success: true };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+fastify.post("/api/wiki/edit-requests", async (req) => {
+  const { document_id, author_id, title, content, summary, edit_summary } = req.body || {};
+  if (!document_id || !author_id || !title || !content || !edit_summary) {
+    return { success: false, error: "document_id, author_id, title, content, edit_summary required" };
+  }
+  const id = crypto.randomUUID();
+  try {
+    db.prepare("INSERT INTO wiki_edit_requests (id, document_id, author_id, title, content, summary, edit_summary) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, document_id, author_id, title, content, summary || null, edit_summary);
+    return { success: true, id };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+fastify.get("/api/wiki/edit-requests", async (req) => {
+  const status = req.query.status || "PENDING";
+  const data = db.prepare("SELECT * FROM wiki_edit_requests WHERE status = ? ORDER BY created_at DESC").all(status);
+  return { success: true, count: data.length, data };
+});
+
+fastify.put("/api/wiki/edit-requests/:id", async (req) => {
+  const id = req.params.id;
+  const { status, reviewed_by_id, review_note } = req.body || {};
+  if (!status || !["APPROVED", "REJECTED"].includes(status)) {
+    return { success: false, error: "status must be APPROVED or REJECTED" };
+  }
+  try {
+    const request = db.prepare("SELECT * FROM wiki_edit_requests WHERE id = ?").get(id);
+    if (!request) return { success: false, error: "not found" };
+    db.prepare("UPDATE wiki_edit_requests SET status = ?, reviewed_by_id = ?, review_note = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, reviewed_by_id, review_note, id);
+    if (status === "APPROVED") {
+      db.prepare("UPDATE wiki_documents SET title = ?, content = ?, summary = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(request.title, request.content, request.summary, request.document_id);
+      db.prepare("INSERT OR REPLACE INTO fts_documents (doc_id, title, content, tags, category) VALUES (?, ?, ?, ?, ?)").run("wiki:" + request.document_id, request.title, request.content, "", "wiki");
+    }
+    return { success: true, status };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+fastify.get("/api/wiki/glossary", async (req) => {
+  const category = req.query.category;
+  const search = req.query.q;
+  let sql = "SELECT * FROM glossary_terms WHERE 1=1";
+  const params = [];
+  if (category) { sql += " AND category = ?"; params.push(category); }
+  if (search) { sql += " AND (term LIKE ? OR definition LIKE ?)"; params.push("%" + search + "%", "%" + search + "%"); }
+  sql += " ORDER BY term";
+  const data = db.prepare(sql).all(...params);
+  return { success: true, count: data.length, data };
+});
+
+fastify.post("/api/wiki/glossary", async (req) => {
+  const { term, definition, category, related_terms, unit } = req.body || {};
+  if (!term || !definition) return { success: false, error: "term, definition required" };
+  const id = crypto.randomUUID();
+  try {
+    db.prepare("INSERT INTO glossary_terms (id, term, definition, category, related_terms, unit) VALUES (?, ?, ?, ?, ?, ?)").run(id, term, definition, category || null, related_terms || null, unit || null);
+    db.prepare("INSERT OR REPLACE INTO fts_documents (doc_id, title, content, tags, category) VALUES (?, ?, ?, ?, ?)").run("glossary:" + id, term, definition, category || "", "glossary");
+    return { success: true, id };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+// ===== Graceful Shutdown =====
 const shutdown = async (sig) => {
   console.log(sig + " received");
   clearInterval(checkpointInterval);
