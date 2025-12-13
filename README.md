@@ -1,123 +1,163 @@
 # kimdb v6.0.0
 
-실시간 WebSocket 기반 JSON 문서 데이터베이스
+A real-time WebSocket-based JSON document database with CRDT support.
 
-## 특징
+> ⚠️ **Experimental**: This project is under active development. Use in production with caution.
 
-- **실시간 동기화**: WebSocket 기반 양방향 통신
-- **Redis Pub/Sub**: 다중 서버 클러스터링 지원
-- **CRDT**: 충돌 없는 복제 데이터 타입
-- **LRU 캐시**: 메모리 효율적 캐싱
-- **Graceful Shutdown**: 안전한 종료
-- **Prometheus 메트릭**: 모니터링 지원
-- **MariaDB 로깅**: 중앙 집중식 로그 저장
+## Features
 
-## 설치
+- **Real-time Sync**: Bidirectional WebSocket communication
+- **Redis Pub/Sub**: Multi-server clustering support
+- **CRDT**: Conflict-free Replicated Data Types (RGA, LWW-Set)
+- **Rich Text**: Collaborative text editing with Undo/Redo
+- **Presence**: Real-time user awareness
+- **SQLite**: Persistent storage with WAL mode
+- **LRU Cache**: Memory-efficient caching
+- **Prometheus Metrics**: Built-in monitoring
+- **Zero Dependencies**: Core CRDT implementation without external libraries (~35KB)
+
+## Installation
 
 ```bash
-git clone git@gogs.dclub.kr:kim/kimdb.git
+git clone https://github.com/bigwash2025a-oss/kimdb.git
 cd kimdb
 npm install
 ```
 
-## 실행
+## Quick Start
 
 ```bash
-# 단일 서버
+# Single server
 npm start
 
-# PM2로 실행
+# With PM2
 pm2 start ecosystem.config.cjs
 ```
 
-## 환경 변수
+## Environment Variables
 
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| PORT | 40000 | API 서버 포트 |
-| REDIS_HOST | 127.0.0.1 | Redis 호스트 |
-| REDIS_PORT | 6379 | Redis 포트 |
-| MARIADB_HOST | 192.168.45.73 | MariaDB 호스트 |
-| SERVER_ID | hostname | 서버 식별자 |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| PORT | 40000 | API server port |
+| REDIS_HOST | 127.0.0.1 | Redis host for clustering |
+| REDIS_PORT | 6379 | Redis port |
+| SERVER_ID | hostname | Server identifier |
 
-## API 엔드포인트
+## API Endpoints
 
 ### REST API
 
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | /health | 서버 상태 |
-| GET | /metrics | Prometheus 메트릭 |
-| GET | /api/collections | 컬렉션 목록 |
-| POST | /api/:collection | 문서 생성 |
-| GET | /api/:collection/:id | 문서 조회 |
-| PUT | /api/:collection/:id | 문서 수정 |
-| DELETE | /api/:collection/:id | 문서 삭제 |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /health | Server health check |
+| GET | /metrics | Prometheus metrics |
+| GET | /api/collections | List all collections |
+| POST | /api/:collection | Create document |
+| GET | /api/:collection/:id | Get document |
+| PUT | /api/:collection/:id | Update document |
+| DELETE | /api/:collection/:id | Delete document |
 
-### WebSocket
+### WebSocket API
 
 ```javascript
 const ws = new WebSocket('ws://localhost:40000');
 
-// 컬렉션 구독
-ws.send(JSON.stringify({ type: 'subscribe', collection: 'users' }));
+// Subscribe to collection
+ws.send(JSON.stringify({
+  type: 'subscribe',
+  collection: 'users'
+}));
 
-// 문서 생성
+// Create document
 ws.send(JSON.stringify({
   type: 'create',
   collection: 'users',
   data: { name: 'kim' }
 }));
+
+// Update document
+ws.send(JSON.stringify({
+  type: 'update',
+  collection: 'users',
+  id: 'doc-id',
+  data: { name: 'updated' }
+}));
+
+// Listen for changes
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  console.log('Change:', msg);
+};
 ```
 
-## 클러스터 구성
+## Clustering
 
-Redis Pub/Sub을 통한 다중 서버 동기화:
+Multi-server synchronization via Redis Pub/Sub:
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌────────────┐
-│  Server 73  │────▶│    Redis    │◀────│ Server 253 │
-│  :40000     │◀────│   Pub/Sub   │────▶│   :40001   │
-└─────────────┘     └─────────────┘     └────────────┘
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Server 1   │────▶│    Redis    │◀────│  Server 2   │
+│  :40000     │◀────│   Pub/Sub   │────▶│   :40001    │
+└─────────────┘     └─────────────┘     └─────────────┘
 ```
 
-## 모니터링
+```bash
+# Server 1
+PORT=40000 REDIS_HOST=redis-server npm start
 
-24시간 대시보드: `http://192.168.45.73:40010`
+# Server 2
+PORT=40001 REDIS_HOST=redis-server npm start
+```
 
-- 서버 상태 실시간 체크
-- MariaDB 로그 저장
-- Gogs 웹훅 연동
+## CRDT Implementation
 
-## 테스트 결과
+kimdb implements the following CRDT algorithms:
 
-| 테스트 | 결과 |
-|--------|------|
-| 기능 테스트 | 13/13 통과 |
-| 부하 테스트 (100 클라이언트) | 32K msg/sec |
-| 부하 테스트 (10,000 클라이언트) | 57K msg/sec, 100% 성공 |
-| 클러스터 테스트 (2서버) | 210만 동기화 이벤트, 0 에러 |
-| 무결성 테스트 | 1,000 문서, 30분 검증 |
+- **RGA (Replicated Growable Array)**: For ordered sequences and text
+- **LWW-Register**: For single values with last-writer-wins semantics
+- **LWW-Set**: For sets with add/remove operations
+- **3-Way Merge**: For complex object merging
+- **Operation Inversion**: For undo/redo support
 
-## 프로젝트 구조
+## Benchmarks
+
+| Test | Result |
+|------|--------|
+| Feature tests | 13/13 passed |
+| Load test (100 clients) | 32K msg/sec |
+| Load test (10,000 clients) | 57K msg/sec, 100% success |
+| Cluster test (2 servers) | 2.1M sync events, 0 errors |
+| Integrity test | 1,000 docs, 30 min verified |
+
+## Project Structure
 
 ```
 kimdb/
 ├── src/
-│   ├── api-server.js      # 메인 API 서버
-│   ├── kimdb-core.js      # 코어 데이터베이스
+│   ├── api-server.js      # Main API server
+│   ├── kimdb-core.js      # Core database engine
+│   ├── crdt.js            # CRDT implementations
 │   └── ...
-├── scripts/
-│   ├── monitor-server.js  # 24시간 모니터링 대시보드
-│   └── cross-check.js     # 크로스 체크 스크립트
 ├── test/
-│   ├── feature-test.js    # 기능 테스트
-│   ├── load-test.js       # 부하 테스트
-│   ├── cluster-test.js    # 클러스터 테스트
-│   └── integrity-test.js  # 무결성 테스트
-└── ecosystem.config.cjs   # PM2 설정
+│   ├── feature-test.js    # Feature tests
+│   ├── load-test.js       # Load tests
+│   ├── cluster-test.js    # Cluster tests
+│   └── integrity-test.js  # Data integrity tests
+└── ecosystem.config.cjs   # PM2 configuration
 ```
 
-## 라이선스
+## Roadmap
+
+- [ ] More CRDT types (Counter, Map)
+- [ ] Offline-first sync queue
+- [ ] Authentication middleware
+- [ ] Horizontal scaling beyond 2 nodes
+- [ ] Admin dashboard
+
+## Contributing
+
+Issues and PRs welcome. This is an experimental project - expect breaking changes.
+
+## License
 
 MIT License
