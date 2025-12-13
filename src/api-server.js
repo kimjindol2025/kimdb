@@ -45,6 +45,14 @@ const config = {
     port: parseInt(process.env.REDIS_PORT) || 6379,
     password: process.env.REDIS_PASSWORD || null
   },
+  mariadb: {
+    enabled: process.env.MARIADB_ENABLED !== "false",
+    host: process.env.MARIADB_HOST || "192.168.45.73",
+    port: parseInt(process.env.MARIADB_PORT) || 3306,
+    user: process.env.MARIADB_USER || "kim",
+    password: process.env.MARIADB_PASSWORD || "kimdb2025",
+    database: process.env.MARIADB_DATABASE || "kimdb_logs"
+  },
   serverId: process.env.SERVER_ID || `srv_${crypto.randomBytes(4).toString("hex")}`,
   // 메모리 관리
   cache: {
@@ -73,6 +81,116 @@ db.pragma("temp_store = MEMORY");
 db.pragma("mmap_size = 268435456");
 db.pragma("busy_timeout = 5000");
 db.pragma("wal_autocheckpoint = 1000");
+
+// ===== MariaDB Logger =====
+let mariaPool = null;
+
+async function initMariaDB() {
+  if (!config.mariadb.enabled) {
+    console.log("[kimdb] MariaDB logging disabled");
+    return;
+  }
+
+  try {
+    const mysql = await import("mysql2/promise");
+    mariaPool = mysql.createPool({
+      host: config.mariadb.host,
+      port: config.mariadb.port,
+      user: config.mariadb.user,
+      password: config.mariadb.password,
+      database: config.mariadb.database,
+      waitForConnections: true,
+      connectionLimit: 5,
+      queueLimit: 0
+    });
+
+    // 연결 테스트
+    const conn = await mariaPool.getConnection();
+    await conn.ping();
+    conn.release();
+    console.log("[kimdb] MariaDB connected:", config.mariadb.host);
+  } catch (e) {
+    console.error("[kimdb] MariaDB connection failed:", e.message);
+    mariaPool = null;
+  }
+}
+
+// 작업 로그 큐 (배치 처리)
+const logQueue = [];
+let logFlushTimer = null;
+
+function logOperation(type, collection, docId, clientId, success = true, details = null) {
+  if (!mariaPool) return;
+
+  logQueue.push({
+    timestamp: Date.now(),
+    server_id: config.serverId,
+    type,
+    collection,
+    doc_id: docId,
+    client_id: clientId,
+    success: success ? 1 : 0,
+    details
+  });
+
+  // 100개 모이면 즉시 flush, 아니면 1초 후 flush
+  if (logQueue.length >= 100) {
+    flushLogs();
+  } else if (!logFlushTimer) {
+    logFlushTimer = setTimeout(flushLogs, 1000);
+  }
+}
+
+async function flushLogs() {
+  if (logFlushTimer) {
+    clearTimeout(logFlushTimer);
+    logFlushTimer = null;
+  }
+
+  if (!mariaPool || logQueue.length === 0) return;
+
+  const batch = logQueue.splice(0, 100);
+  try {
+    const values = batch.map(l => [
+      l.timestamp, l.server_id, l.type, l.collection,
+      l.doc_id, l.client_id, l.success, l.details
+    ]);
+    await mariaPool.query(
+      `INSERT INTO operation_logs (timestamp, server_id, type, collection, doc_id, client_id, success, details)
+       VALUES ?`,
+      [values]
+    );
+  } catch (e) {
+    // 로그 실패는 무시
+  }
+}
+
+// 헬스체크 로그 (3분마다)
+async function logHealthCheck() {
+  if (!mariaPool) return;
+
+  try {
+    const mem = process.memoryUsage();
+    await mariaPool.query(
+      `INSERT INTO health_checks (timestamp, server_id, server_ip, connections, memory_mb, uptime, redis_connected)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        Date.now(),
+        config.serverId,
+        config.host === "0.0.0.0" ? "local" : config.host,
+        clients.size,
+        Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10,
+        Math.floor(process.uptime()),
+        redisConnected ? 1 : 0
+      ]
+    );
+  } catch (e) {
+    // 무시
+  }
+}
+
+// 3분마다 헬스체크
+setInterval(logHealthCheck, 3 * 60 * 1000);
 
 // ===== Redis Pub/Sub (Optional) =====
 let redisPub = null;
@@ -517,6 +635,20 @@ function ensureSchema() {
       method TEXT, path TEXT, status INTEGER, duration_ms INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS operation_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      collection TEXT,
+      doc_id TEXT,
+      client_id TEXT,
+      server_id TEXT,
+      success INTEGER DEFAULT 1,
+      details TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_op_logs_ts ON operation_logs(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_op_logs_type ON operation_logs(type);
   `);
 
   // Check if _sync_log exists and has ts column
@@ -735,6 +867,7 @@ function handleWebSocketMessage(clientId, socket, msg) {
       um.capture({ ...op, previousValue }, previousValue);
 
       metrics.sync.operations++;
+      logOperation("crdt_set", msg.collection, msg.docId, clientId);
       send({ type: "crdt_set_ok", docId: msg.docId, op, version: doc.version });
       break;
     }
@@ -745,6 +878,7 @@ function handleWebSocketMessage(clientId, socket, msg) {
       saveCRDTToDB(msg.collection, msg.docId, doc);
       broadcastOp(msg.collection, msg.docId, msg.operations, clientId);
       metrics.sync.operations += applied;
+      logOperation("crdt_ops", msg.collection, msg.docId, clientId, true, `applied:${applied}`);
       send({ type: "crdt_ops_ok", docId: msg.docId, applied, version: doc.version });
       break;
     }
@@ -998,6 +1132,7 @@ function handleWebSocketMessage(clientId, socket, msg) {
       localBroadcastToDoc(msg.collection, msg.docId, joinMsg, clientId);
       publishToRedis("kimdb:presence", { ...joinMsg, msg: joinMsg });
 
+      logOperation("presence_join", msg.collection, msg.docId, clientId, true, msg.user?.name);
       send({ type: "presence_join_ok", nodeId, users: onlineUsers });
       break;
     }
@@ -1301,6 +1436,10 @@ async function start() {
   console.log(`[kimdb] Server ID: ${config.serverId}`);
 
   await initRedis();
+  await initMariaDB();
+
+  // 시작 시 즉시 헬스체크 로그
+  setTimeout(logHealthCheck, 1000);
 
   try {
     await fastify.listen({ port: config.port, host: config.host });
