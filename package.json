@@ -1,7 +1,7 @@
 {
   "name": "kimdb",
-  "version": "7.0.0",
-  "description": "High-performance document database with CRDT real-time sync",
+  "version": "7.1.0",
+  "description": "High-performance document database with CRDT real-time sync + Transaction Manager",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -24,10 +24,14 @@
     "./crdt": {
       "import": "./dist/crdt/index.js",
       "types": "./dist/crdt/index.d.ts"
+    },
+    "./concurrent": {
+      "import": "./src/concurrent-write.js"
     }
   },
   "files": [
     "dist",
+    "src/concurrent-write.js",
     "README.md",
     "LICENSE"
   ],
@@ -35,6 +39,7 @@
     "dev": "tsx watch src/server/index.ts",
     "build": "tsc && node scripts/post-build.js",
     "start": "node dist/server/index.js",
+    "start:legacy": "node src/api-server.js",
     "test": "vitest run",
     "test:coverage": "vitest --coverage",
     "lint": "eslint src --ext .ts",
@@ -49,17 +54,19 @@
     "sync",
     "sqlite",
     "websocket",
-    "offline-first"
+    "offline-first",
+    "transaction",
+    "concurrent-write"
   ],
   "author": "Kim",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kimdb/kimdb.git"
+    "url": "https://gogs.dclub.kr/kim/kimdb.git"
   },
-  "homepage": "https://github.com/kimdb/kimdb#readme",
+  "homepage": "https://gogs.dclub.kr/kim/kimdb#readme",
   "bugs": {
-    "url": "https://github.com/kimdb/kimdb/issues"
+    "url": "https://gogs.dclub.kr/kim/kimdb/issues"
   },
   "engines": {
     "node": ">=18.0.0"
