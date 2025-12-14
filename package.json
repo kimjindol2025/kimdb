@@ -1,6 +1,6 @@
 {
   "name": "kimdb",
-  "version": "7.1.0",
+  "version": "7.2.0",
   "description": "High-performance document database with CRDT real-time sync + Transaction Manager",
   "type": "module",
   "main": "dist/index.js",
@@ -24,6 +24,9 @@
     "./crdt": {
       "import": "./dist/crdt/index.js",
       "types": "./dist/crdt/index.d.ts"
+    },
+    "./sharding": {
+      "import": "./src/sharding.js"
     },
     "./concurrent": {
       "import": "./src/concurrent-write.js"
