@@ -403,6 +403,7 @@ const metrics = {
   startTime: Date.now(),
   serverId: config.serverId,
   requests: { total: 0, success: 0, error: 0 },
+  writes: { total: 0 },
   websocket: {
     connections: 0,
     peak: 0,
@@ -1382,11 +1383,13 @@ fastify.put("/api/c/:collection/:id", async (req, reply) => {
     const merged = { ...JSON.parse(existing.data), ...data };
     db.prepare(`UPDATE ${col} SET data = ?, _version = _version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(JSON.stringify(merged), id);
+    metrics.writes.total++;
     return { success: true, id, _version: existing._version + 1 };
   } else {
     // INSERT
     db.prepare(`INSERT INTO ${col} (id, data, _version, _deleted, updated_at) VALUES (?, ?, 1, 0, CURRENT_TIMESTAMP)`)
       .run(id, JSON.stringify(data));
+    metrics.writes.total++;
     return { success: true, id, _version: 1 };
   }
 });
@@ -1907,6 +1910,185 @@ const checkpointTimer = setInterval(() => {
     metrics.checkpoints.lastAt = new Date().toISOString();
   } catch (e) {}
 }, 10 * 60 * 1000);
+
+// ===== Monitor Dashboard =====
+fastify.get("/kimdb/dashboard", async (req, reply) => {
+  reply.type("text/html").send(getDashboardHTML());
+});
+
+fastify.get("/kimdb/status", async () => {
+  const shardStats = [];
+
+  // 기본 통계
+  const collections = stmt.getCollections.all();
+  let totalRows = 0;
+
+  for (const col of collections) {
+    try {
+      const count = db.prepare(`SELECT COUNT(*) as c FROM ${col.name} WHERE _deleted = 0`).get();
+      totalRows += count.c;
+    } catch (e) {}
+  }
+
+  return {
+    status: 'healthy',
+    version: VERSION,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    overview: {
+      totalWrites: metrics.writes.total,
+      bufferedWrites: 0,
+      bufferSize: 0,
+      cacheHits: metrics.cache.hits,
+      cacheMisses: metrics.cache.misses,
+      cacheHitRate: metrics.cache.hits ?
+        ((metrics.cache.hits / (metrics.cache.hits + metrics.cache.misses)) * 100).toFixed(1) + '%' : '0%'
+    },
+    collections: collections.length,
+    totalRows,
+    performance: {
+      avgFlushTime: 0,
+      writesPerSecond: 0,
+      peakBufferSize: 0
+    },
+    connections: clients.size
+  };
+});
+
+function getDashboardHTML() {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <title>kimdb Monitor</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0; padding: 20px;
+    }
+    .header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #334155;
+    }
+    .header h1 { color: #38bdf8; font-size: 24px; }
+    .status-badge {
+      padding: 6px 16px; border-radius: 20px; font-weight: 600;
+      background: #22c55e; color: #fff;
+    }
+    .status-badge.error { background: #ef4444; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+
+    .card {
+      background: #1e293b; border-radius: 12px; padding: 20px;
+      border: 1px solid #334155;
+    }
+    .card-title { color: #94a3b8; font-size: 12px; text-transform: uppercase; margin-bottom: 8px; }
+    .card-value { font-size: 32px; font-weight: 700; color: #f8fafc; }
+    .card-sub { color: #64748b; font-size: 14px; margin-top: 4px; }
+
+    .refresh-info { text-align: center; color: #64748b; font-size: 12px; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>kimdb Monitor</h1>
+    <span class="status-badge" id="status">Loading...</span>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Total Writes</div>
+      <div class="card-value" id="totalWrites">-</div>
+      <div class="card-sub" id="writesPerSec">- writes/sec</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Collections</div>
+      <div class="card-value" id="collections">-</div>
+      <div class="card-sub" id="totalRows">- rows total</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Cache Hit Rate</div>
+      <div class="card-value" id="cacheHitRate">-</div>
+      <div class="card-sub" id="cacheStats">Hits: - / Misses: -</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Connections</div>
+      <div class="card-value" id="connections">-</div>
+      <div class="card-sub">WebSocket clients</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Uptime</div>
+      <div class="card-value" id="uptime">-</div>
+      <div class="card-sub" id="version">v-</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Server Time</div>
+      <div class="card-value" id="serverTime">-</div>
+      <div class="card-sub" id="timestamp">-</div>
+    </div>
+  </div>
+
+  <div class="refresh-info">Auto-refresh every 2 seconds</div>
+
+  <script>
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/kimdb/status');
+        const data = await res.json();
+        updateUI(data);
+      } catch (e) {
+        document.getElementById('status').textContent = 'Error';
+        document.getElementById('status').classList.add('error');
+      }
+    }
+
+    function updateUI(data) {
+      const statusEl = document.getElementById('status');
+      statusEl.textContent = data.status.toUpperCase();
+      statusEl.classList.toggle('error', data.status !== 'healthy');
+
+      document.getElementById('totalWrites').textContent = formatNumber(data.overview.totalWrites);
+      document.getElementById('collections').textContent = data.collections;
+      document.getElementById('totalRows').textContent = formatNumber(data.totalRows) + ' rows total';
+      document.getElementById('cacheHitRate').textContent = data.overview.cacheHitRate;
+      document.getElementById('cacheStats').textContent =
+        'Hits: ' + formatNumber(data.overview.cacheHits) + ' / Misses: ' + formatNumber(data.overview.cacheMisses);
+      document.getElementById('connections').textContent = data.connections;
+      document.getElementById('uptime').textContent = formatUptime(data.uptime);
+      document.getElementById('version').textContent = 'v' + data.version;
+      document.getElementById('serverTime').textContent = new Date().toLocaleTimeString();
+      document.getElementById('timestamp').textContent = data.timestamp;
+    }
+
+    function formatNumber(n) {
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+      return String(n);
+    }
+
+    function formatUptime(seconds) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = Math.floor(seconds % 60);
+      if (h > 0) return h + 'h ' + m + 'm';
+      if (m > 0) return m + 'm ' + s + 's';
+      return s + 's';
+    }
+
+    fetchStatus();
+    setInterval(fetchStatus, 2000);
+  </script>
+</body>
+</html>`;
+}
 
 // ===== Start Server =====
 async function start() {
