@@ -345,6 +345,80 @@ export class KimDBClient {
     }
   }
 
+  // ===== REST API =====
+
+  private get httpUrl(): string {
+    // ws:// -> http://, wss:// -> https://
+    return this.options.url
+      .replace(/^ws:/, 'http:')
+      .replace(/^wss:/, 'https:')
+      .replace(/\/ws\/?$/, '');
+  }
+
+  private async httpFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options.headers as Record<string, string> || {}),
+    };
+
+    if (this.options.apiKey) {
+      headers['X-API-Key'] = this.options.apiKey;
+    }
+
+    const res = await fetch(`${this.httpUrl}${path}`, {
+      ...options,
+      headers,
+    });
+
+    if (!res.ok) {
+      const error = await res.text();
+      throw new Error(`HTTP ${res.status}: ${error}`);
+    }
+
+    return res.json() as Promise<T>;
+  }
+
+  /** REST: 컬렉션 문서 목록 조회 */
+  async list(collection: string): Promise<{ docs: Array<{ id: string; data: unknown; _version: number }> }> {
+    return this.httpFetch(`/api/c/${collection}`);
+  }
+
+  /** REST: 단일 문서 조회 */
+  async getDoc(collection: string, id: string): Promise<{ id: string; data: unknown; _version: number }> {
+    return this.httpFetch(`/api/c/${collection}/${id}`);
+  }
+
+  /** REST: 문서 생성 (ID 자동 생성) */
+  async create(collection: string, data: unknown): Promise<{ success: boolean; id: string; _version: number }> {
+    return this.httpFetch(`/api/c/${collection}`, {
+      method: 'POST',
+      body: JSON.stringify({ data }),
+    });
+  }
+
+  /** REST: 문서 저장 (upsert) */
+  async save(collection: string, id: string, data: unknown): Promise<{ success: boolean; id: string; _version: number }> {
+    return this.httpFetch(`/api/c/${collection}/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ data }),
+    });
+  }
+
+  /** REST: 문서 부분 업데이트 */
+  async update(collection: string, id: string, data: unknown): Promise<{ success: boolean; id: string; _version: number }> {
+    return this.httpFetch(`/api/c/${collection}/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ data }),
+    });
+  }
+
+  /** REST: 문서 삭제 */
+  async remove(collection: string, id: string): Promise<{ success: boolean }> {
+    return this.httpFetch(`/api/c/${collection}/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   // ===== State =====
 
   get isConnected(): boolean {
