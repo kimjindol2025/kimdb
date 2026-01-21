@@ -4,6 +4,10 @@
  * 메인 서버 진입점
  */
 
+// KimNexus v9 Central Log
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const nexusLog = require('../../../kimnexus-log.js')('kimdb', '253');
+
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
@@ -386,6 +390,9 @@ export class KimDBServer {
     await this.fastify.listen({ port: this.config.port, host: this.config.host });
     console.log(`[kimdb] v${VERSION} running on http://${this.config.host}:${this.config.port}`);
     console.log(`[kimdb] WebSocket: ws://${this.config.host}:${this.config.port}/ws`);
+
+    // KimNexus 관제소 보고
+    nexusLog.info('System Integrated', { version: VERSION, port: this.config.port }, ['startup']);
   }
 
   private registerRoutes(): void {
@@ -660,8 +667,20 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(0);
   });
 
+  // KimNexus 글로벌 에러 핸들러
+  process.on('uncaughtException', (error) => {
+    nexusLog.error('Uncaught Exception', { name: error.name, message: error.message, stack: error.stack }, ['fatal']);
+    console.error('[kimdb] Uncaught Exception:', error);
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    nexusLog.error('Unhandled Rejection', { reason: String(reason) }, ['fatal']);
+    console.error('[kimdb] Unhandled Rejection:', reason);
+  });
+
   server.start().catch((e) => {
     console.error('[kimdb] Failed to start:', e);
+    nexusLog.error('서버 시작 실패', { message: e.message, stack: e.stack }, ['startup', 'fatal']);
     process.exit(1);
   });
 }

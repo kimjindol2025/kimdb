@@ -1,3 +1,6 @@
+import { createLogger } from './kimnexus-log.mjs';
+const nexusLog = createLogger('kimdb', '253');
+
 /**
  * kimdb v6.0.0 - Production-Grade Real-time Database
  *
@@ -2436,6 +2439,7 @@ async function start() {
     console.log(`[kimdb] v${VERSION} running on port ${config.port}`);
     console.log(`[kimdb] WebSocket: ws://${config.host}:${config.port}/ws`);
     console.log(`[kimdb] Prometheus: http://${config.host}:${config.port}/metrics`);
+    nexusLog.info('System Integrated', { port: config.port, version: VERSION }, ['startup']);
   } catch (e) {
     console.error("[kimdb] Start failed:", e);
     process.exit(1);
@@ -2443,3 +2447,11 @@ async function start() {
 }
 
 start();
+
+// KimNexus v9 에러 핸들러
+process.on('uncaughtException', (error) => {
+  nexusLog.error('Uncaught Exception', error, ['fatal']);
+});
+process.on('unhandledRejection', (reason) => {
+  nexusLog.error('Unhandled Rejection', { reason: String(reason) }, ['fatal']);
+});
