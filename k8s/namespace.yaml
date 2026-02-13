@@ -1,0 +1,9 @@
+---
+# Kubernetes Namespace for KimDB
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kimdb
+  labels:
+    app: kimdb
+    version: "7.6.1"

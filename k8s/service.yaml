@@ -1,0 +1,80 @@
+---
+# KimDB Service (HeadlessService for StatefulSet)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kimdb
+  namespace: kimdb
+  labels:
+    app: kimdb
+spec:
+  clusterIP: None  # Headless Service (StatefulSet용)
+  selector:
+    app: kimdb
+  ports:
+  - name: api
+    port: 40000
+    targetPort: 40000
+    protocol: TCP
+  - name: websocket
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: metrics
+    port: 9100
+    targetPort: 9100
+    protocol: TCP
+
+---
+# KimDB LoadBalancer Service (외부 접속용)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kimdb-lb
+  namespace: kimdb
+  labels:
+    app: kimdb
+spec:
+  type: LoadBalancer
+  selector:
+    app: kimdb
+  ports:
+  - name: api
+    port: 40000
+    targetPort: 40000
+    protocol: TCP
+  - name: websocket
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+
+---
+# KimDB ClusterIP Service (내부 통신용)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kimdb-internal
+  namespace: kimdb
+  labels:
+    app: kimdb
+spec:
+  type: ClusterIP
+  selector:
+    app: kimdb
+  ports:
+  - name: api
+    port: 40000
+    targetPort: 40000
+    protocol: TCP
+  - name: websocket
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: metrics
+    port: 9100
+    targetPort: 9100
+    protocol: TCP

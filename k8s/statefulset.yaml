@@ -1,0 +1,195 @@
+---
+# KimDB StatefulSet for production deployment
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kimdb
+  namespace: kimdb
+  labels:
+    app: kimdb
+    version: "7.6.1"
+spec:
+  serviceName: kimdb
+  replicas: 3  # 고가용성을 위해 3개 인스턴스
+  selector:
+    matchLabels:
+      app: kimdb
+
+  template:
+    metadata:
+      labels:
+        app: kimdb
+        version: "7.6.1"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+        prometheus.io/path: "/metrics"
+
+    spec:
+      # Pod 기동 순서 보장
+      initContainers:
+      - name: wait-redis
+        image: busybox:1.35
+        command: ['sh', '-c', 'until nc -z redis 6379; do echo waiting for Redis; sleep 2; done']
+
+      containers:
+      - name: kimdb
+        image: kimdb:7.6.1-prod
+        imagePullPolicy: IfNotPresent
+
+        # 포트 설정
+        ports:
+        - name: api
+          containerPort: 40000
+          protocol: TCP
+        - name: websocket
+          containerPort: 8080
+          protocol: TCP
+        - name: metrics
+          containerPort: 9100
+          protocol: TCP
+
+        # 환경 변수
+        envFrom:
+        - configMapRef:
+            name: kimdb-config
+        - secretRef:
+            name: kimdb-secret
+
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+
+        # 리소스 제한
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+
+        # 헬스체크
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: api
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: api
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+
+        # 시작/정지 전처리
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 15"]
+
+        # 볼륨 마운트
+        volumeMounts:
+        - name: kimdb-data
+          mountPath: /app/data
+        - name: kimdb-logs
+          mountPath: /app/logs
+        - name: kimdb-backups
+          mountPath: /app/backups
+        - name: tmp
+          mountPath: /tmp
+
+        # 보안 컨텍스트
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+
+      # 볼륨 정의
+      volumes:
+      - name: tmp
+        emptyDir: {}
+
+      # Pod 어피니티 설정 (분산 배치)
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - kimdb
+              topologyKey: kubernetes.io/hostname
+
+      # 노드 선택
+      nodeSelector:
+        node-type: database
+
+      # Tolerations (특수 노드 허용)
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "kimdb"
+        effect: "NoSchedule"
+
+      # 종료 유예 기간
+      terminationGracePeriodSeconds: 30
+
+      # DNS 정책
+      dnsPolicy: ClusterFirst
+
+  # 영구 스토리지
+  volumeClaimTemplates:
+  - metadata:
+      name: kimdb-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "fast-ssd"
+      resources:
+        requests:
+          storage: 100Gi
+
+  - metadata:
+      name: kimdb-logs
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "standard"
+      resources:
+        requests:
+          storage: 50Gi
+
+  - metadata:
+      name: kimdb-backups
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "standard"
+      resources:
+        requests:
+          storage: 200Gi

@@ -1,0 +1,295 @@
+version: '3.9'
+
+# KimDB Production Docker Compose
+# 용도: 프로덕션 배포, 고가용성, 모니터링
+# 사용: docker-compose -f docker-compose.prod.yml up -d
+
+services:
+  # ============================================================================
+  # KimDB 메인 서버 (고가용성 설정)
+  # ============================================================================
+  kimdb:
+    image: kimdb:7.6.1-prod
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      args:
+        NODE_VERSION: "20-alpine"
+    container_name: kimdb-server
+    restart: always
+
+    # 포트 설정 (프로덕션)
+    ports:
+      - "40000:40000"      # API 포트
+      - "3000:3000"        # 백업 포트
+      - "8080:8080"        # WebSocket 포트
+
+    # 환경 변수 (보안: .env 파일에서 로드)
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      NODE_OPTIONS: "--max-old-space-size=4096"
+
+    # 볼륨 마운트 (데이터 영속성)
+    volumes:
+      - kimdb-data:/app/data
+      - kimdb-logs:/app/logs
+      - kimdb-backups:/app/backups
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+
+    # 헬스체크
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:40000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    # 리소스 제한 (메모리 누수 방지)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+
+    # 네트워크
+    networks:
+      - kimdb-network
+
+    # 로깅 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        labels: "service=kimdb"
+
+    # 시그널 처리
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+
+  # ============================================================================
+  # Redis (캐시 & 세션)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: kimdb-redis
+    restart: always
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - redis-data:/data
+
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfilename "appendonly.aof"
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:-changeme}
+      --bind 0.0.0.0
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+    networks:
+      - kimdb-network
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ============================================================================
+  # Prometheus (메트릭 수집)
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: kimdb-prometheus
+    restart: always
+
+    ports:
+      - "9090:9090"
+
+    volumes:
+      - ./monitoring/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+
+    environment:
+      - TZ=UTC
+
+    networks:
+      - kimdb-network
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ============================================================================
+  # Grafana (시각화 & 대시보드)
+  # ============================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: kimdb-grafana
+    restart: always
+
+    ports:
+      - "3001:3000"
+
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: 'grafana-piechart-panel'
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      GF_LOG_MODE: production
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+
+    networks:
+      - kimdb-network
+
+    depends_on:
+      - prometheus
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ============================================================================
+  # AlertManager (경보 관리)
+  # ============================================================================
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: kimdb-alertmanager
+    restart: always
+
+    ports:
+      - "9093:9093"
+
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+
+    networks:
+      - kimdb-network
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ============================================================================
+  # Nginx (리버스 프록시 & 로드 밸런싱)
+  # ============================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: kimdb-nginx
+    restart: always
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx-cache:/var/cache/nginx
+
+    depends_on:
+      - kimdb
+
+    networks:
+      - kimdb-network
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+# ============================================================================
+# 볼륨 정의 (데이터 영속성)
+# ============================================================================
+volumes:
+  kimdb-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data
+
+  kimdb-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./logs
+
+  kimdb-backups:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./backups
+
+  redis-data:
+    driver: local
+
+  prometheus-data:
+    driver: local
+
+  grafana-data:
+    driver: local
+
+  alertmanager-data:
+    driver: local
+
+  nginx-cache:
+    driver: local
+
+# ============================================================================
+# 네트워크 정의
+# ============================================================================
+networks:
+  kimdb-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-kimdb
+      com.docker.network.bridge.enable_ip_masquerade: 'true'

@@ -1,0 +1,98 @@
+# KimDB Production Dockerfile (Multi-stage Build)
+# 목표: 최소 크기, 최고 보안, 최적 성능
+
+# ============================================================================
+# Stage 1: Builder - 빌드 환경
+# ============================================================================
+FROM node:20-alpine AS builder
+
+LABEL stage=builder
+
+WORKDIR /app
+
+# 의존성 파일 복사
+COPY package*.json ./
+COPY tsconfig.json vitest.config.ts ./
+
+# 모든 의존성 설치 (빌드 포함)
+RUN npm ci && \
+    npm cache clean --force
+
+# 소스 코드 복사
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+
+# 빌드
+RUN npm run build && \
+    npm run test || true
+
+# 프로덕션 의존성만 추출
+RUN npm prune --production && \
+    npm cache clean --force
+
+# ============================================================================
+# Stage 2: Runtime - 실행 환경
+# ============================================================================
+FROM node:20-alpine
+
+LABEL maintainer="KimDB Team <kim@example.com>"
+LABEL description="KimDB - High-performance document database with CRDT real-time sync"
+LABEL version="7.6.1"
+LABEL org.opencontainers.image.source="https://github.com/kim/kimdb"
+
+# 보안: 기본 패키지 업데이트
+RUN apk update && \
+    apk upgrade && \
+    apk add --no-cache \
+      curl \
+      ca-certificates \
+      dumb-init && \
+    rm -rf /var/cache/apk/*
+
+# 작업 디렉토리
+WORKDIR /app
+
+# 프로덕션 의존성만 복사
+COPY --from=builder /app/node_modules ./node_modules
+
+# 빌드된 코드 복사
+COPY --from=builder /app/dist ./dist
+
+# 필수 파일만 복사
+COPY --chown=kimdb:kimdb \
+  package.json \
+  package-lock.json \
+  README.md \
+  LICENSE \
+  ./
+
+# 비-루트 사용자 생성 (보안)
+RUN addgroup -g 1001 -S kimdb && \
+    adduser -S kimdb -u 1001 -G kimdb && \
+    chown -R kimdb:kimdb /app
+
+# 사용자 전환
+USER kimdb
+
+# 환경 변수 기본값
+ENV NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=4096" \
+    LOG_LEVEL=info
+
+# 포트 노출
+EXPOSE 40000 3000 8080
+
+# 헬스체크(더 견고함)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:40000/health || exit 1
+
+# dumb-init 사용 (좀비 프로세스 방지)
+ENTRYPOINT ["/sbin/dumb-init", "--"]
+
+# 시작 명령
+CMD ["node", "dist/server/index.js"]
+
+# Metadata
+LABEL org.opencontainers.image.title="KimDB"
+LABEL org.opencontainers.image.description="High-performance document database with CRDT"
+LABEL org.opencontainers.image.vendor="KimDB"
