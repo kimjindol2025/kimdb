@@ -1,0 +1,608 @@
+openapi: 3.0.0
+info:
+  title: KimDB API
+  description: |
+    High-performance document database with CRDT real-time sync
+
+    **Features:**
+    - CRDT-based conflict-free synchronization
+    - Real-time WebSocket updates
+    - 909K inserts/sec throughput
+    - SQLite-based storage with 8-shard parallel processing
+    - Offline-first support
+  version: 7.6.1
+  contact:
+    name: KimDB Team
+    url: https://github.com/kim/kimdb
+    email: kim@example.com
+  license:
+    name: MIT
+    url: https://github.com/kim/kimdb/blob/master/LICENSE
+  x-logo:
+    url: https://img.shields.io/badge/KimDB-7.6.1-brightgreen
+
+servers:
+  - url: http://localhost:40000
+    description: Local development
+    variables:
+      port:
+        default: '40000'
+  - url: https://api.example.com
+    description: Production
+  - url: https://staging-api.example.com
+    description: Staging
+
+tags:
+  - name: Health & Metrics
+    description: Server status and performance metrics
+  - name: Collections
+    description: Manage collections and documents
+  - name: Documents
+    description: CRUD operations on documents
+  - name: SQL
+    description: Execute SQL queries
+  - name: WebSocket
+    description: Real-time synchronization and updates
+  - name: Authentication
+    description: JWT-based authentication
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health & Metrics
+      summary: Health check
+      description: Check server health and basic information
+      operationId: getHealth
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: 7.6.1
+                  serverId:
+                    type: string
+                    example: "server-001"
+                  uptime:
+                    type: integer
+                    description: Uptime in seconds
+                    example: 3600
+                  connections:
+                    type: integer
+                    description: Number of active WebSocket connections
+                    example: 42
+
+  /api/metrics:
+    get:
+      tags:
+        - Health & Metrics
+      summary: Get performance metrics
+      description: Retrieve detailed performance metrics including requests, WebSocket, and cache stats
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Metrics data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  version:
+                    type: string
+                    example: 7.6.1
+                  serverId:
+                    type: string
+                    example: "server-001"
+                  uptime_seconds:
+                    type: integer
+                    example: 3600
+                  requests:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                        example: 1000
+                      success:
+                        type: integer
+                        example: 950
+                      error:
+                        type: integer
+                        example: 50
+                  websocket:
+                    type: object
+                    properties:
+                      connections:
+                        type: integer
+                        example: 42
+                      peak:
+                        type: integer
+                        example: 100
+                      messages:
+                        type: object
+                        properties:
+                          sent:
+                            type: integer
+                            example: 5000
+                          received:
+                            type: integer
+                            example: 4800
+                      broadcasts:
+                        type: integer
+                        example: 1200
+                  sync:
+                    type: object
+                    properties:
+                      operations:
+                        type: integer
+                        example: 15000
+                      conflicts:
+                        type: integer
+                        example: 3
+                  cache:
+                    type: object
+                    properties:
+                      hits:
+                        type: integer
+                        example: 8000
+                      misses:
+                        type: integer
+                        example: 2000
+                      evictions:
+                        type: integer
+                        example: 100
+                  memory:
+                    type: object
+                    properties:
+                      cachedDocs:
+                        type: integer
+                        example: 256
+                      presenceManagers:
+                        type: integer
+                        example: 10
+                      undoManagers:
+                        type: integer
+                        example: 8
+                      heapUsed:
+                        type: string
+                        example: "256MB"
+
+  /api/collections:
+    get:
+      tags:
+        - Collections
+      summary: List all collections
+      description: Get a list of all collections in the database
+      operationId: listCollections
+      responses:
+        '200':
+          description: List of collections
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  collections:
+                    type: array
+                    items:
+                      type: string
+                    example:
+                      - users
+                      - documents
+                      - posts
+                      - comments
+
+  /api/c/{collection}:
+    get:
+      tags:
+        - Documents
+      summary: Get all documents in a collection
+      description: Retrieve all documents from a specific collection
+      operationId: getCollectionDocuments
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          description: Collection name
+          schema:
+            type: string
+            example: users
+      responses:
+        '200':
+          description: Collection documents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  collection:
+                    type: string
+                    example: users
+                  count:
+                    type: integer
+                    example: 5
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: "user-001"
+                        _version:
+                          type: integer
+                          example: 3
+                      additionalProperties: true
+                    example:
+                      - id: "user-001"
+                        name: "John Doe"
+                        email: "john@example.com"
+                        _version: 3
+                      - id: "user-002"
+                        name: "Jane Smith"
+                        email: "jane@example.com"
+                        _version: 2
+
+  /api/c/{collection}/{id}:
+    get:
+      tags:
+        - Documents
+      summary: Get a specific document
+      description: Retrieve a single document by ID from a collection
+      operationId: getDocument
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          description: Collection name
+          schema:
+            type: string
+            example: users
+        - name: id
+          in: path
+          required: true
+          description: Document ID
+          schema:
+            type: string
+            example: user-001
+      responses:
+        '200':
+          description: Document data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  id:
+                    type: string
+                    example: "user-001"
+                  _version:
+                    type: integer
+                    example: 3
+                  data:
+                    type: object
+                    example:
+                      name: "John Doe"
+                      email: "john@example.com"
+                      role: "admin"
+        '404':
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Not found"
+
+  /api/sql:
+    post:
+      tags:
+        - SQL
+      summary: Execute SQL query
+      description: Execute a custom SQL query on a collection
+      operationId: executeSql
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sql
+                - collection
+              properties:
+                sql:
+                  type: string
+                  description: SQL query to execute
+                  example: "SELECT * FROM users WHERE age > ? ORDER BY name"
+                params:
+                  type: array
+                  description: Query parameters (bound variables)
+                  items:
+                    type:
+                      - string
+                      - number
+                      - boolean
+                      - "null"
+                  example: [18]
+                collection:
+                  type: string
+                  description: Collection name
+                  example: "users"
+            examples:
+              selectQuery:
+                summary: SELECT query
+                value:
+                  sql: "SELECT * FROM users WHERE age > ? ORDER BY name"
+                  params: [18]
+                  collection: "users"
+              countQuery:
+                summary: COUNT query
+                value:
+                  sql: "SELECT COUNT(*) as total FROM users"
+                  collection: "users"
+              aggregationQuery:
+                summary: Aggregation query
+                value:
+                  sql: "SELECT role, COUNT(*) as count FROM users GROUP BY role"
+                  collection: "users"
+      responses:
+        '200':
+          description: Query executed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                    example:
+                      - id: "user-001"
+                        name: "John Doe"
+                        age: 30
+                      - id: "user-002"
+                        name: "Jane Smith"
+                        age: 28
+                  count:
+                    type: integer
+                    example: 2
+        '400':
+          description: Bad request (missing required fields)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        '500':
+          description: SQL execution error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
+  /ws:
+    get:
+      tags:
+        - WebSocket
+      summary: WebSocket real-time sync
+      description: |
+        Connect to WebSocket endpoint for real-time document synchronization.
+
+        **Message Types:**
+        - `subscribe`: Subscribe to collection updates
+        - `doc.subscribe`: Subscribe to specific document
+        - `doc.update`: Update a document (CRDT operation)
+        - `doc.undo`: Undo last operation
+        - `doc.redo`: Redo last operation
+        - `presence.update`: Update presence information
+        - `ping`: Heartbeat
+      operationId: connectWebSocket
+      responses:
+        '101':
+          description: WebSocket upgrade successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    enum:
+                      - connected
+                      - subscribed
+                      - doc.synced
+                      - presence.updated
+                      - error
+                  clientId:
+                    type: string
+                    example: "client-abc123"
+                  serverId:
+                    type: string
+                    example: "server-001"
+
+components:
+  schemas:
+    # Document
+    Document:
+      type: object
+      required:
+        - id
+        - data
+      properties:
+        id:
+          type: string
+          description: Document unique identifier
+          example: "doc-001"
+        data:
+          type: object
+          description: Document data (any JSON object)
+          additionalProperties: true
+          example:
+            title: "My Document"
+            content: "Lorem ipsum..."
+            tags:
+              - "important"
+              - "draft"
+        _version:
+          type: integer
+          description: Document version (CRDT vector clock)
+          example: 5
+        _created:
+          type: string
+          format: date-time
+          description: Document creation timestamp
+          example: "2024-01-15T10:30:00Z"
+        _updated:
+          type: string
+          format: date-time
+          description: Last update timestamp
+          example: "2024-01-15T11:45:00Z"
+
+    # Collection
+    Collection:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "users"
+        documentCount:
+          type: integer
+          example: 1000
+        indexedFields:
+          type: array
+          items:
+            type: string
+          example:
+            - "email"
+            - "createdAt"
+
+    # Error
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "Invalid request"
+        code:
+          type: string
+          description: Error code
+          example: "INVALID_REQUEST"
+        details:
+          type: object
+          description: Additional error details
+          additionalProperties: true
+
+    # WebSocket Message
+    WebSocketMessage:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - subscribe
+            - doc.subscribe
+            - doc.update
+            - doc.undo
+            - doc.redo
+            - presence.update
+            - ping
+          example: "subscribe"
+        collection:
+          type: string
+          example: "users"
+        docId:
+          type: string
+          example: "user-001"
+        data:
+          type: object
+          additionalProperties: true
+        nodeId:
+          type: string
+          description: Client node ID for CRDT
+          example: "node-abc123"
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token (64+ characters)
+
+  parameters:
+    collection:
+      name: collection
+      in: path
+      required: true
+      description: Collection name
+      schema:
+        type: string
+    docId:
+      name: id
+      in: path
+      required: true
+      description: Document ID
+      schema:
+        type: string
+
+  responses:
+    '400BadRequest':
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    '404NotFound':
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    '500ServerError':
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+security:
+  - BearerAuth: []
+
+externalDocs:
+  description: Full documentation
+  url: https://github.com/kim/kimdb/tree/master/docs
