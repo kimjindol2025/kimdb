@@ -1,8 +1,10 @@
 # KimDB
 
+[![Build](https://github.com/kim/kimdb/actions/workflows/test.yml/badge.svg)](https://github.com/kim/kimdb/actions)
 [![npm version](https://img.shields.io/npm/v/kimdb.svg)](https://www.npmjs.com/package/kimdb)
 [![npm downloads](https://img.shields.io/npm/dw/kimdb.svg)](https://www.npmjs.com/package/kimdb)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 
 > 고성능 실시간 협업 문서 데이터베이스 (SQLite + WebSocket + CRDT)
 

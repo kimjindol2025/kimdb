@@ -1,0 +1,43 @@
+# KimDB Code Owners
+# This file specifies who reviews and maintains different parts of the codebase
+
+# Main maintainer
+* @kim
+
+# CRDT implementation
+src/crdt/ @kim
+src/vector-clock/ @kim
+
+# Database core
+src/database/ @kim
+src/storage/ @kim
+src/transaction/ @kim
+
+# Network and WebSocket
+src/server/ @kim
+src/client/ @kim
+src/websocket/ @kim
+
+# Performance and sharding
+src/hyper-scale/ @kim
+src/sharding/ @kim
+
+# Build and CI/CD
+.github/workflows/ @kim
+tsconfig.json @kim
+package.json @kim
+
+# Documentation
+README.md @kim
+CHANGELOG.md @kim
+docs/ @kim
+SECURITY.md @kim
+
+# Tests
+tests/ @kim
+vitest.config.ts @kim
+
+# Configuration
+ecosystem.config.cjs @kim
+docker-compose.yml @kim
+Dockerfile @kim
