@@ -81,11 +81,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://gogs.dclub.kr/kim/kimdb.git"
+    "url": "https://github.com/kimjindol2025/kimdb.git"
   },
-  "homepage": "https://gogs.dclub.kr/kim/kimdb#readme",
+  "homepage": "https://github.com/kimjindol2025/kimdb#readme",
   "bugs": {
-    "url": "https://gogs.dclub.kr/kim/kimdb/issues"
+    "url": "https://github.com/kimjindol2025/kimdb/issues"
   },
   "engines": {
     "node": ">=18.0.0"
