@@ -1,6 +1,6 @@
 {
   "name": "kimdb",
-  "version": "7.6.1",
+  "version": "7.6.2",
   "description": "High-performance document database with CRDT real-time sync + HyperScale + Transaction Manager",
   "type": "module",
   "main": "dist/index.js",

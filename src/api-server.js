@@ -44,7 +44,7 @@ const config = {
   host: process.env.HOST || "0.0.0.0",
   apiKey: process.env.KIMDB_API_KEY || "kimdb-dev-key-2025",
   redis: {
-    enabled: process.env.REDIS_ENABLED === "true",
+    enabled: true,
     host: process.env.REDIS_HOST || "127.0.0.1",
     port: parseInt(process.env.REDIS_PORT) || 6379,
     password: process.env.REDIS_PASSWORD || null
