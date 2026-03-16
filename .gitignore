@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+Cargo.lock
+
+# Build artifacts
+/target/
+/build/
+/dist/
+*.o
+*.a
+*.so
+*.dylib
+
+# Executables
+*.exe
+*.out
+a.out
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+
+# Environment
+.env
+.env.local
+
+# Generated files
+*.ll
+*.bc
+*.s
