@@ -1,0 +1,122 @@
+{
+  "name": "kimdb",
+  "version": "7.6.2",
+  "description": "High-performance document database with CRDT real-time sync + HyperScale + Transaction Manager",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "kimdb": "dist/cli/index.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./server": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+    },
+    "./client": {
+      "import": "./dist/client/index.js",
+      "types": "./dist/client/index.d.ts"
+    },
+    "./crdt": {
+      "import": "./dist/crdt/index.js",
+      "types": "./dist/crdt/index.d.ts"
+    },
+    "./simple": {
+      "import": "./src/sdk/simple-client.js"
+    },
+    "./hyperscale": {
+      "import": "./src/hyper-scale-safe.js"
+    },
+    "./sharding": {
+      "import": "./src/sharding.js"
+    },
+    "./concurrent": {
+      "import": "./src/concurrent-write.js"
+    },
+    "./monitor": {
+      "import": "./src/monitor.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src/sdk",
+    "src/hyper-scale.js",
+    "src/hyper-scale-safe.js",
+    "src/sharding.js",
+    "src/monitor.js",
+    "src/concurrent-write.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/server/index.ts",
+    "build": "tsc && node scripts/post-build.js",
+    "start": "node dist/server/index.js",
+    "start:legacy": "node src/api-server.js",
+    "test": "vitest run",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src --ext .ts",
+    "docs": "typedoc --out docs src/index.ts",
+    "prepublish:manual": "npm run build && npm run test"
+  },
+  "keywords": [
+    "database",
+    "document-database",
+    "crdt",
+    "real-time",
+    "sync",
+    "sqlite",
+    "websocket",
+    "offline-first",
+    "transaction",
+    "concurrent-write",
+    "hyperscale",
+    "sharding"
+  ],
+  "author": "Kim",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://gogs.dclub.kr/kim/kimdb.git"
+  },
+  "homepage": "https://gogs.dclub.kr/kim/kimdb#readme",
+  "bugs": {
+    "url": "https://gogs.dclub.kr/kim/kimdb/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@fastify/websocket": "^10.0.1",
+    "@google/genai": "^1.33.0",
+    "better-sqlite3": "^11.3.0",
+    "fastify": "^4.28.1",
+    "ioredis": "^5.0.0",
+    "mysql2": "^3.15.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "tsx": "^4.19.0",
+    "typedoc": "^0.26.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.0"
+  },
+  "peerDependencies": {
+    "ioredis": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ioredis": {
+      "optional": true
+    }
+  }
+}

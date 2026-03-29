@@ -1,0 +1,17 @@
+{
+  "프로젝트명": "kimdb",
+  "notion_page_id": null,
+  "notion_db_id": "37cb2a51-8b32-46c5-b868-178da969b7ed",
+  "last_sync": null,
+  "sync_count": 0,
+  "last_change_date": "2026-03-15",
+  "auto_sync_enabled": true,
+  "watch_file": ".claude/changes.md",
+  "sync_fields": [
+    "상태",
+    "기술스택_결정사항",
+    "상태_상세",
+    "최근_작업",
+    "우선순위"
+  ]
+}
