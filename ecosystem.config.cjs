@@ -2,7 +2,7 @@ module.exports = {
   apps: [{
     name: 'kimdb',
     script: 'src/api-server.js',
-    cwd: '/home/kimjin/kimdb',
+    cwd: '/home/kimjin/kim/Desktop/kim/01_Active_Projects/kimdb',
     interpreter: 'node',
     env: {
       PORT: 40000,
