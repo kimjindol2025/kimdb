@@ -1,5 +1,6 @@
 import { createLogger } from './kimnexus-log.mjs';
 const nexusLog = createLogger('kimdb', '253');
+import { HyperScaleDB } from './hyper-scale.js';
 
 /**
  * kimdb v6.0.0 - Production-Grade Real-time Database
@@ -120,6 +121,23 @@ writeFileSync(lockFile, JSON.stringify({
 }));
 
 const db = new Database(DB_PATH);
+
+// ===== HyperScale Engine =====
+const HYPER_DIR = join(__dirname, '..', 'data', 'hyperscale');
+if (!existsSync(HYPER_DIR)) mkdirSync(HYPER_DIR, { recursive: true });
+
+const hyperDB = new HyperScaleDB({
+  dbPath: join(HYPER_DIR, 'hyper.db'),
+  shardCount: 8,
+  bufferSize: 10000,
+  flushInterval: 100,
+  batchSize: 1000
+});
+try {
+  hyperDB.init();
+} catch (e) {
+  console.error('[kimdb] HyperScale init error:', e.message);
+}
 
 // 안전 레벨에 따른 pragma 설정
 db.pragma("journal_mode = WAL");
@@ -2286,6 +2304,45 @@ fastify.get("/kimdb/safety", async () => {
     stats: safetyStats,
     backups: getBackupList()
   };
+});
+
+// ===== HyperScale API =====
+
+// 배치 INSERT — 909K/sec 엔진 직접 사용
+fastify.post("/api/c/:collection/batch", async (req, reply) => {
+  const col = req.params.collection;
+  const { items } = req.body || {};
+  if (!Array.isArray(items) || items.length === 0) {
+    return reply.code(400).send({ error: 'items 배열 필수' });
+  }
+  // items: [{id?, data: {}}]
+  const mapped = items.map((item, idx) => ({
+    id: item.id || `${col}_${Date.now()}_${idx}`,
+    data: item.data || {}
+  }));
+  hyperDB.writeBatch(col, mapped);
+  return { ok: true, count: mapped.length, engine: 'hyperscale', buffered: true };
+});
+
+// HyperScale 단건 읽기
+fastify.get("/api/hs/:collection/:id", async (req, reply) => {
+  const { collection, id } = req.params;
+  const result = hyperDB.read(collection, id);
+  if (result === null || result === undefined) {
+    return reply.code(404).send({ error: 'not found' });
+  }
+  return { id, data: result };
+});
+
+// HyperScale 통계
+fastify.get("/api/hyperscale/stats", async () => {
+  return hyperDB.getStats();
+});
+
+// HyperScale 강제 flush
+fastify.post("/api/hyperscale/flush", async () => {
+  hyperDB.flushSync();
+  return { ok: true, flushed: true };
 });
 
 function getDashboardHTML() {
